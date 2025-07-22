@@ -36,7 +36,7 @@ int main(int argc, char *argv[])
     int N = 10;
     int max_refinement = 1000;
     int show_steps = 100;
-    bool render=true;
+    bool display=true;
     bool write=false;
     bool is_delaunay=false;
 
@@ -61,7 +61,7 @@ int main(int argc, char *argv[])
     if (argc >= 7) {
         outpath = argv[6];
         write=true;
-        render=false;
+        display=false;
     }
     fmt::print("Start Incremental\n");
     fmt::print("    N              = {}\n",N);
@@ -147,17 +147,7 @@ int main(int argc, char *argv[])
             if (nr < show_steps) break;
         }
 
-        /*
-        std::vector<Point> dual_points;
-        while (!IC.m_refinement_candidates.empty()){
-            Candidate c = IC.m_refinement_candidates.top();
-            IC.m_refinement_candidates.pop();
-            dual_points.push_back(c.m_point);
-        }
-        */
-
-        if (render) {
-
+        if (display) {
             polyscope::init();
             polyscope::registerSurfaceMesh("Ground Truth", V, F);
             auto s = polyscope::registerPointCloud("Samples", S.block(0,0,S.rows(),3));
@@ -172,10 +162,6 @@ int main(int argc, char *argv[])
             s->addScalarQuantity("Sign", signs)->setEnabled(true);
             s->setEnabled(false);
 
-            // polyscope::registerPointCloud("Dual Points", dual_points)->setEnabled(false);
-            // auto pm = polyscope::registerTetMesh("Primal Mesh", IC.m_positions,Tp);
-            // pm->setEnabled(false);
-
             for (int i=0; i<Vs_mt.size(); i++) {
                 auto rec = polyscope::registerSurfaceMesh(fmt::format("MT Rec {} ({} samples)",i,Rs[i]), Vs_mt[i], Fs_mt[i]);
                 if (i!= Vs_mt.size()-1) rec->setEnabled(false); 
@@ -188,7 +174,6 @@ int main(int argc, char *argv[])
             polyscope::show();
         } 
         if (write) {
-        // if (false) { // disable writing for timings
             fmt::print("Write files to folder {}\n", outpath);
             std::string filename = std::string(fs::path(argv[1]).filename());
             fmt::print("filename is : {}\n", filename);
