@@ -49,8 +49,7 @@ find_package(CGAL REQUIRED COMPONENTS Core)
 
 # Add your project files
 include_directories("./src/")
-file(GLOB SRCFILES2D ./src/2D/*.cpp)
-file(GLOB SRCFILES3D ./src/3D/*.cpp)
+file(GLOB SRCFILES3D ./src/*.cpp)
 file(GLOB HEADERS *.h ./src/*.h ./lib/*.hpp ./lib/*.h)
 
 add_executable(${PROJECT_NAME} incremental.cpp ${SRCFILES} ${SRCFILES3D} ${HEADERS})
