@@ -111,7 +111,7 @@ class IncrementalContouring {
         }
     }
    
-    void fill_regular_tri(const Eigen::MatrixXd &G, bool delaunay=false,bool pbyp=false){
+    void fill_regular_tri(const Eigen::MatrixXd &G, bool delaunay=false){
 
         // Create Regular Tri
         m_T = Rt();
@@ -129,19 +129,11 @@ class IncrementalContouring {
             m_sdf_values.push_back(sdfv);
         }
 
-        if (pbyp) {
-            // insert vertices one after the other in order to add the info() with the index
-            for (Weighted_point p : P){
-                Rt::Vertex_handle vh = m_T.insert(p);
-                vh->info() = m_maxind++;
-            }
-        } else {
-            // create list with info and insert at once (CGAL can sort and optimize)
-            std::vector<std::pair<Weighted_point, int>> P_with_info; 
-            for (Weighted_point p : P) P_with_info.push_back(std::pair(p,m_maxind++));
-            
-            m_T.insert(P_with_info.begin(),P_with_info.end());
-        }
+        // create list with info and insert at once (CGAL can sort and optimize)
+        std::vector<std::pair<Weighted_point, int>> P_with_info; 
+        for (Weighted_point p : P) P_with_info.push_back(std::pair(p,m_maxind++));
+        
+        m_T.insert(P_with_info.begin(),P_with_info.end());
 
         assert( m_T.is_valid() );
         assert( m_T.dimension() == 3 );
@@ -277,6 +269,117 @@ class IncrementalContouring {
         }
     }
 
+
+    void triangulate_polygon_ifs(const std::vector<Point> &dual_vertices, const std::vector<std::vector<int>> &dual_faces, Eigen::MatrixXd &V, Eigen::MatrixXi &F){
+        
+        V.resize(dual_vertices.size()+dual_faces.size(),3);
+        int n_dual_tris = 0;
+        for (auto f: dual_faces) n_dual_tris += f.size();
+        F.resize(n_dual_tris,3);
+
+        int i=0;
+        for (; i<dual_vertices.size(); i++) {
+            V.row(i) = Eigen::RowVector3d (dual_vertices[i].x(), dual_vertices[i].y(), dual_vertices[i].z());
+        }
+        
+        int fi=0;
+        for (auto f: dual_faces){
+            int vc=0;
+            int vn;
+            Eigen::RowVector3d center_vertex = Eigen::RowVector3d::Zero();
+            for (; vc<f.size(); vc++){
+                center_vertex += V.row(f[vc]);
+                vn = (vc+1)%f.size(); 
+                F.row(fi++) = Eigen::RowVector3i(i,f[vc],f[vn]);
+            }
+            center_vertex /= f.size();
+            V.row(i) = center_vertex;
+            i++;
+        }
+    }
+
+    void extract_dual_contour_ifs(std::vector<Point> &dual_vertices, std::vector<std::vector<int>> &dual_faces){
+
+        typedef Tds::Cell_handle    Cell_handle;
+        typedef Tds::Vertex_handle  Vertex_handle;
+
+        std::vector<std::vector<Cell_handle>> df_cells;
+
+        // add contour cell handles of an edge
+        auto add_edge = [&](Tds::Edge e, bool reverse){
+
+                std::vector<Cell_handle> facet;
+                bool valid = true;
+                // traverse adjacent cells and add the vertices to the facet (if they are finite)
+                Tds::Cell_circulator cc = m_T.incident_cells(e);
+                Tds::Cell_circulator strt = cc;
+
+                std::function<Tds::Cell_circulator()> inc = [&](){return ++cc;};
+                if (reverse) {
+                    inc = [&](){return --cc;};
+                }
+
+                do {
+                    if (m_T.is_infinite(cc)){
+                        valid=false;
+                        break;
+                    } 
+                    Cell_handle ch = cc;
+                    facet.push_back(ch);
+                    /*
+                    Point p = T.dual(cc);
+                    facet.push_back(p);
+                    */
+                } while (inc() != strt);
+                
+                df_cells.push_back(facet);
+        };
+        
+        // add contour cell handle for all edges
+        for (auto e: m_T.finite_edges()){
+            Tds::Cell_handle ch = e.first;
+            int vi_cell = e.second;
+            int vj_cell = e.third;
+            int vi = ch->vertex(vi_cell)->info();
+            int vj = ch->vertex(vj_cell)->info();
+           
+            if ((m_sdf_values[vi] < 0.) && (m_sdf_values[vj] >= 0.)){
+                add_edge(e, false);
+            } else if ((m_sdf_values[vi] >= 0.) && (m_sdf_values[vj] <  0.)) {
+                add_edge(e, true);
+            }
+
+        }
+
+        // transform contour cell handles to IFS
+        std::unordered_map<Cell_handle, int> cell_map;
+        dual_vertices.clear();
+        dual_faces.clear();
+
+        for (auto fc_handles : df_cells){
+            std::vector<int> facet;
+            for (auto ch :fc_handles) {
+                if (cell_map.find(ch) == cell_map.end()){
+                    // create dual vertex if it doesnt exist yer
+                    dual_vertices.push_back(m_T.dual(ch));
+                    cell_map[ch] = dual_vertices.size()-1;
+                }
+                facet.push_back(cell_map[ch]);
+            }
+            dual_faces.push_back(facet);
+        }
+    }
+
+    void extract_dual_contour_ifs_triangulated(Eigen::MatrixXd &V, Eigen::MatrixXi &F){
+
+        std::vector<Point>              dual_vertices;
+        std::vector<std::vector<int>>   dual_faces;
+        fmt::print("call contour ifs\n");
+        extract_dual_contour_ifs(dual_vertices,dual_faces);
+        fmt::print("call triangulate polygon ifs\n");
+        triangulate_polygon_ifs(dual_vertices,dual_faces, V, F);
+    }
+
 };
 
 int main(int argc, char *argv[])
@@ -291,7 +394,7 @@ int main(int argc, char *argv[])
     bool is_delaunay=false;
 
     if(argc<2) {
-        fmt::print("usage: {} (N) (max_refinement) (show_steps) (outpath)\n", argv[0]);
+        fmt::print("usage: {} (filepath) (N) (max_refinement) (outpath)\n", argv[0]);
         return 0;
     }
     if (argc >=3) {
@@ -300,23 +403,19 @@ int main(int argc, char *argv[])
     if (argc >= 4) {
         max_refinement = atoi(argv[3]);
     }
+
     if (argc >= 5) {
-        show_steps = atoi(argv[4]);
+        is_delaunay = atoi(argv[4]);
     }
 
     if (argc >= 6) {
-        is_delaunay = atoi(argv[5]);
-    }
-
-    if (argc >= 7) {
-        outpath = argv[6];
+        outpath = argv[5];
         write=true;
         render=false;
     }
     fmt::print("Start Incremental\n");
     fmt::print("    N              = {}\n",N);
     fmt::print("    max_refinement = {}\n",max_refinement);
-    fmt::print("    show_steps     = {}\n",show_steps);
     if (write) {
     fmt::print("    outpath      = {}\n",outpath);
     }
@@ -352,134 +451,66 @@ int main(int argc, char *argv[])
         fmt::print("S.shape: ({},{})\n",S.rows(),S.cols());
 
         IncrementalContouring IC(S,is_delaunay);
-      
-        std::vector<int> Rs;
-        std::vector<Eigen::MatrixXd> Vs_mt;
-        std::vector<Eigen::MatrixXi> Fs_mt;
 
-        std::vector<Eigen::MatrixXd> Vp_I;
-        std::vector<Eigen::VectorXd> Sp_I;
-
-        auto log_recs = [&](){
-
-            // extract current triangulation and SDF values
-            Eigen::MatrixXd Vp;
-            Eigen::MatrixXi Tp;
-            Eigen::VectorXd Sp;
-            IC.to_ifs(Vp,Tp,Sp);
-
-            // log positions and sdf values 
-            Vp_I.push_back(Vp);
-            Sp_I.push_back(Sp);
-
-            // perform marching tets
-            Eigen::MatrixXd V_mt;
-            Eigen::MatrixXi F_mt;
-            igl::marching_tets(Vp,Tp, Sp, 0.0, V_mt, F_mt);
-
-            // log MT results and resolution
-            Vs_mt.push_back(V_mt);
-            Fs_mt.push_back(F_mt);
-            Rs.push_back(IC.m_maxind);
-        };
-
-        log_recs();
-
-        fmt::print("Start {} Refinement\n", (IC.m_is_delaunay)? "DELAUNAY": "REGULAR");
-
-        int rsteps = 0;
-        while (rsteps < max_refinement) {
-            int nr = IC.refine(show_steps,sdf);
-            fmt::print("performed {} refinement steps\n", nr);
-            log_recs();
-
-            rsteps += nr;
-            if (nr < show_steps) break;
+        if (max_refinement > 0) {
+            fmt::print("Start {} Refinement\n", (IC.m_is_delaunay)? "DELAUNAY": "REGULAR");
+            int nr = IC.refine(max_refinement,sdf);
+        } else {
+            fmt::print("No Refinement");
         }
 
-        std::vector<Point> dual_points;
-        while (!IC.m_refinement_candidates.empty()){
-            Candidate c = IC.m_refinement_candidates.top();
-            IC.m_refinement_candidates.pop();
-            dual_points.push_back(c.m_point);
-        }
+        // Primal Contouring:
+        // extract current triangulation and SDF values
+        Eigen::MatrixXd Vp;
+        Eigen::MatrixXi Tp;
+        Eigen::VectorXd Sp;
+        IC.to_ifs(Vp,Tp,Sp);
 
-        if (render) {
+        // perform marching tets
+        Eigen::MatrixXd V_mt;
+        Eigen::MatrixXi F_mt;
+        igl::marching_tets(Vp,Tp, Sp, 0.0, V_mt, F_mt);
 
-            polyscope::init();
-            polyscope::registerSurfaceMesh("Ground Truth", V, F);
-            auto s = polyscope::registerPointCloud("Samples", S.block(0,0,S.rows(),3));
-            Eigen::VectorXd R = S.col(3);
-            Eigen::VectorXd signs(R.size());
-            for (int i=0; i<R.size(); i++){
-                signs(i) = (R(i)>=0.)?1. : -1.;
-                R(i) = fabs(R(i));
-            }
-            s->addScalarQuantity("radii", R);
-            s->setPointRadiusQuantity("radii",false);
-            s->addScalarQuantity("Sign", signs)->setEnabled(true);
-            s->setEnabled(false);
+        // Dual Contouring:
+        Eigen::MatrixXd Vd;
+        Eigen::MatrixXi Pd;
+        IC.extract_dual_contour_ifs_triangulated(Vd, Pd);
 
-            // polyscope::registerPointCloud("Dual Points", dual_points)->setEnabled(false);
-            // auto pm = polyscope::registerTetMesh("Primal Mesh", IC.m_positions,Tp);
-            // pm->setEnabled(false);
+        polyscope::init();
+        polyscope::registerSurfaceMesh("Primal Reconstruction", V_mt, F_mt);
+        polyscope::registerSurfaceMesh("Dual Reconstruction", Vd, Pd);
+        polyscope::show();
 
-            for (int i=0; i<Vs_mt.size(); i++) {
-                auto rec = polyscope::registerSurfaceMesh(fmt::format("MT Rec {} ({} samples)",i,Rs[i]), Vs_mt[i], Fs_mt[i]);
-                if (i!= Vs_mt.size()-1) rec->setEnabled(false); 
-            }
 
-            polyscope::SlicePlane* psPlane = polyscope::addSceneSlicePlane();
-            psPlane->setDrawPlane(false);
-            psPlane->setDrawWidget(true);
-            polyscope::options::groundPlaneMode = polyscope::GroundPlaneMode::None;
-            polyscope::show();
-        } 
-        if (write) {
-        // if (false) { // disable writing for timings
-            fmt::print("Write files to folder {}\n", outpath);
-            std::string filename = std::string(fs::path(argv[1]).filename());
-            fmt::print("filename is : {}\n", filename);
+        /*
+        fmt::print("Write files to folder {}\n", outpath);
+        std::string filename = std::string(fs::path(argv[1]).filename());
+        fmt::print("filename is : {}\n", filename);
+        // (D)elaunay (Refinement) / (R)egular (R)efinement
+        std::string method_string((is_delaunay)? "DTMTR":"RegMTR");
 
-            // (D)elaunay (Refinement) / (R)egular (R)efinement
-            std::string method_string((is_delaunay)? "DTMTR":"RegMTR");
+        const static Eigen::IOFormat CSVFormat(Eigen::StreamPrecision, Eigen::DontAlignCols, ", ", "\n");
 
-            const static Eigen::IOFormat CSVFormat(Eigen::StreamPrecision, Eigen::DontAlignCols, ", ", "\n");
-            for (int i=0; i<Vs_mt.size(); i++) {
+        std::ofstream vertfile(fmt::format("{}/{}_{}_{}_V.csv",outpath,filename, method_string,N,nr));
+        vertfile << V_mt.format(CSVFormat);
+        vertfile.close();
 
-                std::ofstream vertfile(fmt::format("{}/{}_{}_{}_{}_{}_V.csv",outpath,filename, method_string,N,i,Rs[i]));
-                vertfile << Vs_mt[i].format(CSVFormat);
-                vertfile.close();
+        std::ofstream trifile(fmt::format("{}/{}_{}_{}_{}_F.csv",outpath,filename,method_string,N,nr));
+        trifile << F_mt.format(CSVFormat);
+        trifile.close();
 
-                std::ofstream trifile(fmt::format("{}/{}_{}_{}_{}_{}_F.csv",outpath,filename,method_string,N,i,Rs[i]));
-                trifile << Fs_mt[i].format(CSVFormat);
-                trifile.close();
+        // log sample positions
+        std::ofstream posfile(fmt::format("{}/{}_{}_{}_{}_P.csv",outpath,filename,method_string,N,nr));
+        posfile << Vp.format(CSVFormat);
+        posfile.close();
 
-                // log sample positions
-                std::ofstream posfile(fmt::format("{}/{}_{}_{}_{}_{}_P.csv",outpath,filename,method_string,N,i,Rs[i]));
-                posfile << Vp_I[i].format(CSVFormat);
-                posfile.close();
+        // log sample positions
+        std::ofstream valfile(fmt::format("{}/{}_{}_{}_{}_S.csv",outpath,filename,method_string,N,nr));
+        valfile << Sp.format(CSVFormat);
+        valfile.close();
 
-                // log sample positions
-                std::ofstream valfile(fmt::format("{}/{}_{}_{}_{}_{}_S.csv",outpath,filename,method_string,N,i,Rs[i]));
-                valfile << Sp_I[i].format(CSVFormat);
-                valfile.close();
-
-            }
-
-            for (int i=0; i<Rs.size(); i++) {
-
-                // write out a regular sdf grid in an appropriate resolution
-                Eigen::MatrixXd S;
-                int N = std::ceil(std::pow(Rs[i],1./3.));
-                sample_sdf(N,S,sdf);
-                std::ofstream sdfgridfile(fmt::format("{}/{}_{}_sdfgrid.csv",outpath,filename,N));
-                sdfgridfile <<S.format(CSVFormat);
-                sdfgridfile.close();
-            }
-        }
-
-    } 
+        */
+    }
 
     return 1;
 }
