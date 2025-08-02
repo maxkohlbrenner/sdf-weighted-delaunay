@@ -7,58 +7,10 @@
 #include "polyscope/surface_mesh.h"
 #include "polyscope/volume_mesh.h"
 
-#include <CGAL/Exact_predicates_inexact_constructions_kernel.h>
-#include <CGAL/Regular_triangulation_3.h>
-#include <CGAL/Regular_triangulation_cell_base_3.h>
-#include <CGAL/Regular_triangulation_vertex_base_3.h>
-#include <CGAL/Triangulation_vertex_base_with_info_3.h>
-typedef CGAL::Exact_predicates_inexact_constructions_kernel         K;
-typedef K::FT                                                       Weight;
-typedef K::Point_3                                                  Point;
-typedef K::Weighted_point_3                                         Weighted_point;
-typedef CGAL::Regular_triangulation_vertex_base_3<K>                Vb0;
-typedef CGAL::Triangulation_vertex_base_with_info_3<int, K, Vb0>    Vb;
-typedef CGAL::Regular_triangulation_cell_base_3<K>                  Cb;
-typedef CGAL::Triangulation_data_structure_3<Vb,Cb>                 Tds;
-typedef CGAL::Regular_triangulation_3<K, Tds>                       Rt;
-typedef Tds::Vertex_handle                                          Vertex_handle;
-typedef Tds::Cell_handle                                            Cell_handle;
+// #include "src/IRT.hpp"
 
 #include <filesystem>
 namespace fs = std::filesystem;
-
-// ----------------------- REFINEMENT ------------------------------
-class Candidate {
-    public:
-    Vertex_handle m_v0;
-    Vertex_handle m_v1;
-    Vertex_handle m_v2;
-    Vertex_handle m_v3;
-    double m_score;
-    Point m_point;
-
-	Candidate(  Vertex_handle v0,
-                Vertex_handle v1,
-                Vertex_handle v2,
-                Vertex_handle v3,
-				Point p,
-                double score ) : 
-                m_v0{v0},m_v1{v1},m_v2{v2},m_v3{v3},m_point{p},m_score{score}
-    {}
-  // ~CCandidate() {} 
-};
-
-struct less_refinement
-{ 
-  bool operator()(const Candidate& c1, 
-                  const Candidate& c2) const
-  {
-    return (c1.m_score < c2.m_score);
-  }
-};
-typedef typename std::priority_queue<Candidate, std::vector<Candidate>,less_refinement > PQueue;
-
-// ------------------------------------------------------------------
 
 void sample_sdf(int res, Eigen::MatrixXd &G, std::function<double(double,double,double)> sdf){
     G.resize(res*res*res, 4);
@@ -76,19 +28,6 @@ void sample_sdf(int res, Eigen::MatrixXd &G, std::function<double(double,double,
         }
     }
 }
-
-
-void get_RT_faces(const Rt &T, Eigen::MatrixXi &F){
-    F.resize(T.number_of_finite_cells(),4);
-    int i=0;
-    for (auto ch: T.finite_cell_handles()){
-        for (int vi=0; vi<4; vi++) {
-            F(i,vi) = ch->vertex(vi)->info();
-        }    
-        i++;
-    }
-}
-
 
 class IncrementalContouring {       
     public:             
@@ -389,12 +328,12 @@ int main(int argc, char *argv[])
     int N = 10;
     int max_refinement = 1000;
     int show_steps = 100;
-    bool render=true;
+    bool display=true;
     bool write=false;
     bool is_delaunay=false;
 
     if(argc<2) {
-        fmt::print("usage: {} (filepath) (N) (max_refinement) (outpath)\n", argv[0]);
+        fmt::print("usage: {} filepath (N) (max_refinement) (delaunay) (outpath)\n", argv[0]);
         return 0;
     }
     if (argc >=3) {
@@ -411,7 +350,7 @@ int main(int argc, char *argv[])
     if (argc >= 6) {
         outpath = argv[5];
         write=true;
-        render=false;
+        display=false;
     }
     fmt::print("Start Incremental\n");
     fmt::print("    N              = {}\n",N);
@@ -481,14 +420,45 @@ int main(int argc, char *argv[])
         polyscope::registerSurfaceMesh("Dual Reconstruction", Vd, Pd);
         polyscope::show();
 
-
         /*
         fmt::print("Write files to folder {}\n", outpath);
         std::string filename = std::string(fs::path(argv[1]).filename());
         fmt::print("filename is : {}\n", filename);
         // (D)elaunay (Refinement) / (R)egular (R)efinement
         std::string method_string((is_delaunay)? "DTMTR":"RegMTR");
+        */
 
+        if (true) {
+            polyscope::init();
+            polyscope::registerSurfaceMesh("Ground Truth", V, F);
+            auto s = polyscope::registerPointCloud("Samples", S.block(0,0,S.rows(),3));
+            Eigen::VectorXd R = S.col(3);
+            Eigen::VectorXd signs(R.size());
+            for (int i=0; i<R.size(); i++){
+                signs(i) = (R(i)>=0.)?1. : -1.;
+                R(i) = fabs(R(i));
+            }
+            s->addScalarQuantity("radii", R);
+            s->setPointRadiusQuantity("radii",false);
+            s->addScalarQuantity("Sign", signs)->setEnabled(true);
+            s->setEnabled(false);
+
+            for (int i=0; i<Vs_mt.size(); i++) {
+                auto rec = polyscope::registerSurfaceMesh(fmt::format("MT Rec {} ({} samples)",i,Rs[i]), Vs_mt[i], Fs_mt[i]);
+                if (i!= Vs_mt.size()-1) rec->setEnabled(false); 
+            }
+
+            polyscope::SlicePlane* psPlane = polyscope::addSceneSlicePlane();
+            psPlane->setDrawPlane(false);
+            psPlane->setDrawWidget(true);
+            polyscope::options::groundPlaneMode = polyscope::GroundPlaneMode::None;
+            polyscope::show();
+        } 
+        /*
+        if (write) {
+            fmt::print("Write files to folder {}\n", outpath);
+            std::string filename = std::string(fs::path(argv[1]).filename());
+            fmt::print("filename is : {}\n", filename);
         const static Eigen::IOFormat CSVFormat(Eigen::StreamPrecision, Eigen::DontAlignCols, ", ", "\n");
 
         std::ofstream vertfile(fmt::format("{}/{}_{}_{}_V.csv",outpath,filename, method_string,N,nr));
