@@ -1,5 +1,6 @@
 #include <fmt/core.h>
 #include "igl/read_triangle_mesh.h"
+#include "igl/writeOBJ.h"
 #include "igl/signed_distance.h"
 #include "igl/marching_tets.h"
 
@@ -227,8 +228,6 @@ class IncrementalContouring {
                 }
             }
 
-            // fmt::print("...next one\n\n");
-
         }
 
         return ninserts;
@@ -439,9 +438,10 @@ int main(int argc, char *argv[])
 
         IncrementalContouring IC(S,is_delaunay);
 
+        int nr=0;
         if (max_refinement > 0) {
             fmt::print("Start {} Refinement\n", (IC.m_is_delaunay)? "DELAUNAY": "REGULAR");
-            int nr = IC.refine(max_refinement,sdf);
+            nr = IC.refine(max_refinement,sdf);
         } else {
             fmt::print("No Refinement");
         }
@@ -460,28 +460,14 @@ int main(int argc, char *argv[])
 
         // Dual Contouring:
         Eigen::MatrixXd Vd;
-        Eigen::MatrixXi Pd;
-        IC.extract_dual_contour_ifs_triangulated(Vd, Pd);
+        Eigen::MatrixXi Fd;
+        IC.extract_dual_contour_ifs_triangulated(Vd, Fd);
 
-        polyscope::init();
-        polyscope::registerSurfaceMesh("Primal Reconstruction", V_mt, F_mt);
-        polyscope::registerSurfaceMesh("Dual Reconstruction", Vd, Pd);
-        polyscope::show();
-
-        /*
-        fmt::print("Write files to folder {}\n", outpath);
-        std::string filename = std::string(fs::path(argv[1]).filename());
-        fmt::print("filename is : {}\n", filename);
-        // (D)elaunay (Refinement) / (R)egular (R)efinement
-        std::string method_string((is_delaunay)? "DTMTR":"RegMTR");
-        */
-
-        /*
-        if (false) {
+        if (display) {
             polyscope::init();
-            polyscope::registerSurfaceMesh("Ground Truth", V, F);
-            auto s = polyscope::registerPointCloud("Samples", S.block(0,0,S.rows(),3));
-            Eigen::VectorXd R = S.col(3);
+
+            auto s = polyscope::registerPointCloud("Samples", Vp);
+            Eigen::VectorXd R = Sp;
             Eigen::VectorXd signs(R.size());
             for (int i=0; i<R.size(); i++){
                 signs(i) = (R(i)>=0.)?1. : -1.;
@@ -489,46 +475,29 @@ int main(int argc, char *argv[])
             }
             s->addScalarQuantity("radii", R);
             s->setPointRadiusQuantity("radii",false);
-            s->addScalarQuantity("Sign", signs)->setEnabled(true);
+            s->addScalarQuantity("Sign", signs)->setColorMap("coolwarm")->setEnabled(true);
             s->setEnabled(false);
-
-            for (int i=0; i<Vs_mt.size(); i++) {
-                auto rec = polyscope::registerSurfaceMesh(fmt::format("MT Rec {} ({} samples)",i,Rs[i]), Vs_mt[i], Fs_mt[i]);
-                if (i!= Vs_mt.size()-1) rec->setEnabled(false); 
-            }
-
             polyscope::SlicePlane* psPlane = polyscope::addSceneSlicePlane();
             psPlane->setDrawPlane(false);
             psPlane->setDrawWidget(true);
+
+            auto mpc_ = polyscope::registerSurfaceMesh("Primal Contouring", V_mt, F_mt);
+            auto mdc_ = polyscope::registerSurfaceMesh("Dual   Contouring", Vd, Fd);
+            mpc_->setIgnoreSlicePlane(psPlane->name, true);
+            mdc_->setIgnoreSlicePlane(psPlane->name, true);
+
             polyscope::options::groundPlaneMode = polyscope::GroundPlaneMode::None;
             polyscope::show();
-        } 
-
+        }
         if (write) {
             fmt::print("Write files to folder {}\n", outpath);
+            // fmt::print("filename is : {}\n", filename);
+            // (D)elaunay (Refinement) / (R)egular (R)efinement
             std::string filename = std::string(fs::path(argv[1]).filename());
-            fmt::print("filename is : {}\n", filename);
-        const static Eigen::IOFormat CSVFormat(Eigen::StreamPrecision, Eigen::DontAlignCols, ", ", "\n");
-
-        std::ofstream vertfile(fmt::format("{}/{}_{}_{}_V.csv",outpath,filename, method_string,N,nr));
-        vertfile << V_mt.format(CSVFormat);
-        vertfile.close();
-
-        std::ofstream trifile(fmt::format("{}/{}_{}_{}_{}_F.csv",outpath,filename,method_string,N,nr));
-        trifile << F_mt.format(CSVFormat);
-        trifile.close();
-
-        // log sample positions
-        std::ofstream posfile(fmt::format("{}/{}_{}_{}_{}_P.csv",outpath,filename,method_string,N,nr));
-        posfile << Vp.format(CSVFormat);
-        posfile.close();
-
-        // log sample positions
-        std::ofstream valfile(fmt::format("{}/{}_{}_{}_{}_S.csv",outpath,filename,method_string,N,nr));
-        valfile << Sp.format(CSVFormat);
-        valfile.close();
-
-        */
+            std::string method_string((is_delaunay)? "DTMTR":"RegMTR");
+            std::string filepath = fmt::format("{}/{}_{}_{}_{}.obj",outpath,filename,method_string,N,nr);
+            igl::writeOBJ(filepath, V_mt, F_mt);
+        }
     }
 
     return 1;
