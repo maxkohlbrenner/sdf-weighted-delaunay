@@ -50,9 +50,7 @@ find_package(CGAL REQUIRED COMPONENTS Core)
 message(STATUS "CGAL_DIR: ${CGAL_DIR}")
 
 # Add your project files
-include_directories("./src/")
-file(GLOB SRCFILES3D ./src/*.cpp)
-file(GLOB HEADERS *.h ./src/*.h ./lib/*.hpp ./lib/*.h)
+file(GLOB HEADERS *.hpp ./src/*.hpp)
 
-add_executable(${PROJECT_NAME} incremental.cpp ${SRCFILES} ${SRCFILES3D} ${HEADERS})
+add_executable(${PROJECT_NAME} incremental.cpp ${HEADERS})
 target_link_libraries(${PROJECT_NAME} CGAL::CGAL Eigen3::Eigen polyscope fmt::fmt igl::core)
