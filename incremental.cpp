@@ -49,15 +49,15 @@ int main(int argc, char *argv[])
     if (argc >=3) {
         N = atoi(argv[2]);
     }
-    if (argc >= 4) {
+    if (argc >=4) {
         max_refinement = atoi(argv[3]);
     }
 
-    if (argc >= 5) {
+    if (argc >=5) {
         is_delaunay = atoi(argv[4]);
     }
 
-    if (argc >= 6) {
+    if (argc >=6) {
         outpath = argv[5];
         write=true;
         display=false;
@@ -121,12 +121,14 @@ int main(int argc, char *argv[])
         Eigen::MatrixXi F_mt;
         igl::marching_tets(Vp,Tp, Sp, 0.0, V_mt, F_mt);
 
-        // Dual Contouring:
-        Eigen::MatrixXd Vd;
-        Eigen::MatrixXi Fd;
-        IC.extract_dual_contour_ifs_triangulated(Vd, Fd);
 
         if (display) {
+
+            // Dual Contouring:
+            Eigen::MatrixXd Vd;
+            Eigen::MatrixXi Fd;
+            IC.extract_dual_contour_ifs_triangulated(Vd, Fd);
+
             polyscope::init();
 
             auto s = polyscope::registerPointCloud("Samples", Vp);
@@ -148,6 +150,7 @@ int main(int argc, char *argv[])
             auto mdc_ = polyscope::registerSurfaceMesh("Dual   Contouring", Vd, Fd);
             mpc_->setIgnoreSlicePlane(psPlane->name, true);
             mdc_->setIgnoreSlicePlane(psPlane->name, true);
+            mdc_->setEnabled(false);
 
             polyscope::options::groundPlaneMode = polyscope::GroundPlaneMode::None;
             polyscope::show();
