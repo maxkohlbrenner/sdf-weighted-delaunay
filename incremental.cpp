@@ -37,7 +37,6 @@ int main(int argc, char *argv[])
     std::string outpath;
     int N = 10;
     int max_refinement = 1000;
-    int show_steps = 100;
     bool display=true;
     bool write=false;
     bool is_delaunay=false;

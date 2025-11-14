@@ -166,14 +166,14 @@ class IncrementalContouring {
                 Point point         = c.m_point;
                 double sdfvalue = sdf(point.x(),point.y(),point.z());
                 Weighted_point pw(point, (m_is_delaunay)? 0. : sdfvalue*sdfvalue);
+
                 Vertex_handle v = m_T.insert(pw,cell); 
+
                 // fmt::print("    inserted!\n");
                 v->info() = m_maxind++;
                 m_positions.push_back(point);
                 m_sdf_values.push_back(sdfvalue);
 
-                // fmt::print("    info is: {}\n", v->info());
-                if(++ninserts >= steps) return ninserts;
 
                 std::list<Cell_handle> cells;
                 m_T.incident_cells(v,std::back_inserter(cells));
@@ -191,6 +191,9 @@ class IncrementalContouring {
                         m_refinement_candidates.push(Candidate(c->vertex(0),c->vertex(1),c->vertex(2),c->vertex(3),pw.point(),pw.weight()));
                     }
                 }
+
+                // fmt::print("    info is: {}\n", v->info());
+                if(++ninserts >= steps) return ninserts;
 
             } else {
                 if(debug) {
